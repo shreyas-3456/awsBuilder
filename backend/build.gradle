@@ -1,0 +1,88 @@
+import org.gradle.api.logging.LogLevel
+
+plugins {
+    id 'java'
+    id 'org.springframework.boot' version '3.4.3'
+    id 'io.spring.dependency-management' version '1.1.7'
+}
+
+group = 'com.awsBuilder'
+version = '0.0.1-SNAPSHOT'
+description = 'aws builder in spring boot'
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(17)
+    }
+}
+
+configurations {
+    compileOnly {
+        extendsFrom annotationProcessor
+    }
+}
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    implementation 'org.springframework.boot:spring-boot-starter-web'
+    implementation 'org.springframework.boot:spring-boot-starter-actuator'
+    implementation 'org.springframework.boot:spring-boot-starter-jdbc'
+    implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
+    implementation 'org.springframework.boot:spring-boot-starter-validation'
+    implementation 'org.springframework.boot:spring-boot-starter-cache'
+    implementation 'com.fasterxml.jackson.core:jackson-databind'
+    implementation 'com.github.ben-manes.caffeine:caffeine'
+
+    // AWS SDK BOM — manages all versions
+    implementation platform('software.amazon.awssdk:bom:2.25.67')
+    implementation 'software.amazon.awssdk:ec2'
+    implementation 'software.amazon.awssdk:s3'
+    implementation 'software.amazon.awssdk:elasticloadbalancingv2'
+    implementation 'software.amazon.awssdk:rds'
+    implementation 'software.amazon.awssdk:lambda'
+    implementation 'software.amazon.awssdk:ecs'
+    implementation 'software.amazon.awssdk:eks'
+    implementation 'software.amazon.awssdk:sns'
+    implementation 'software.amazon.awssdk:sqs'
+    implementation 'software.amazon.awssdk:iam'
+
+    implementation 'org.postgresql:postgresql'
+
+    // Micrometer Tracing and Brave
+    implementation platform('io.micrometer:micrometer-tracing-bom:1.2.0')
+    implementation 'io.micrometer:micrometer-tracing-bridge-brave'
+    implementation 'io.zipkin.brave:brave'
+
+    // Logback encoder for structured JSON logging
+    implementation 'net.logstash.logback:logstash-logback-encoder:7.4'
+
+    // P6Spy for SQL query interception
+    implementation 'p6spy:p6spy:3.9.1'
+
+    compileOnly 'org.projectlombok:lombok'
+    annotationProcessor 'org.projectlombok:lombok'
+    testImplementation 'org.springframework.boot:spring-boot-starter-test'
+    testRuntimeOnly 'com.h2database:h2'
+    testImplementation 'net.jqwik:jqwik:1.8.2'
+    testImplementation 'org.testcontainers:testcontainers:1.19.7'
+    testImplementation 'org.testcontainers:postgresql:1.19.7'
+    testImplementation 'org.testcontainers:junit-jupiter:1.19.7'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+bootRun {
+    standardOutput = System.out
+    errorOutput = System.err
+}
+
+tasks.withType(JavaExec).configureEach {
+    standardOutput = System.out
+    errorOutput = System.err
+}
+
+test {
+    useJUnitPlatform()
+}
