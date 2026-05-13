@@ -329,6 +329,7 @@ class TracingIntegrationTest {
         DiagramDTO diagram = new DiagramDTO();
         diagram.setNodes(List.of(node));
         diagram.setEdges(List.of());
+        diagram.setRegion("us-east-1");
 
         return diagram;
     }

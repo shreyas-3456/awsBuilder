@@ -32,7 +32,12 @@ class TerraformGeneratorTest {
             new S3ResourceTemplate(),
             new RdsResourceTemplate(),
             new IgwResourceTemplate(),
-            new LbResourceTemplate()
+            new LbResourceTemplate(),
+            new EventBridgeResourceTemplate(),
+            new LambdaResourceTemplate(),
+            new SqsResourceTemplate(),
+            new SnsResourceTemplate(),
+            new KinesisResourceTemplate()
         );
         ResourceTemplateRegistry registry = new ResourceTemplateRegistry(templates);
         generator = new TerraformGenerator(registry);
@@ -184,6 +189,49 @@ class TerraformGeneratorTest {
         int providerIndex = terraform.indexOf("provider");
         int resourceIndex = terraform.indexOf("resource");
         assertTrue(providerIndex < resourceIndex, "Provider should come before resources");
+    }
+
+    @Test
+    @DisplayName("EventBridge generates rule targets and target permissions")
+    void eventBridgeGeneratesTargetsAndPermissions() {
+        DiagramDTO diagram = new DiagramDTO(
+            List.of(
+                node("eb-infra", "EVENTBRIDGE", Map.of(
+                    "rule_name", "ec2-state-monitor",
+                    "event_bus_name", "default",
+                    "description", "Monitors EC2 instance state changes",
+                    "event_pattern", "{\"source\":[\"aws.ec2\"],\"detail-type\":[\"EC2 Instance State-change Notification\"]}",
+                    "state", "ENABLED",
+                    "tags", "Name=my-event-rule"
+                )),
+                node("lambda-1", "LAMBDA", Map.of("function_name", "infra-event-handler")),
+                node("sqs-1", "SQS", Map.of("queue_name", "order-processing")),
+                node("kinesis-1", "KINESIS", Map.of("stream_name", "event-archive-stream", "shard_count", "1")),
+                node("sns-1", "SNS", Map.of("topic_name", "infra-alerts"))
+            ),
+            List.of(
+                new EdgeDTO("e-eb-lambda", "eb-infra", "lambda-1", "smoothstep"),
+                new EdgeDTO("e-eb-sqs", "eb-infra", "sqs-1", "smoothstep"),
+                new EdgeDTO("e-eb-kinesis", "eb-infra", "kinesis-1", "smoothstep"),
+                new EdgeDTO("e-eb-sns", "eb-infra", "sns-1", "smoothstep")
+            ),
+            "us-east-1"
+        );
+
+        String terraform = generateTerraform(diagram);
+
+        assertTrue(terraform.contains("resource \"aws_cloudwatch_event_rule\" \"eb-infra\""));
+        assertTrue(terraform.contains("event_pattern = <<PATTERN"));
+        assertTrue(terraform.contains("resource \"aws_cloudwatch_event_target\" \"eb-infra_lambda-1\""));
+        assertTrue(terraform.contains("arn            = aws_lambda_function.lambda-1.arn"));
+        assertTrue(terraform.contains("resource \"aws_lambda_permission\" \"eb-infra_lambda-1\""));
+        assertTrue(terraform.contains("resource \"aws_cloudwatch_event_target\" \"eb-infra_sqs-1\""));
+        assertTrue(terraform.contains("resource \"aws_sqs_queue_policy\" \"sqs-1_eventbridge_policy\""));
+        assertTrue(terraform.contains("resource \"aws_cloudwatch_event_target\" \"eb-infra_sns-1\""));
+        assertTrue(terraform.contains("resource \"aws_sns_topic_policy\" \"sns-1_eventbridge_policy\""));
+        assertTrue(terraform.contains("resource \"aws_cloudwatch_event_target\" \"eb-infra_kinesis-1\""));
+        assertTrue(terraform.contains("resource \"aws_iam_role\" \"eb-infra_eventbridge_target_role\""));
+        assertTrue(terraform.contains("role_arn       = aws_iam_role.eb-infra_eventbridge_target_role.arn"));
     }
 
     // --- Helpers ---
