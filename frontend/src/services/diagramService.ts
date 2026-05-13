@@ -1,7 +1,6 @@
 import axios from 'axios';
 import { DiagramDTO, TerraformResponse, ErrorResponse } from '../types/diagram';
-
-const API_BASE_URL = '/api';
+import { API_BASE_URL } from './apiBaseUrl';
 
 class DiagramService {
   async generateTerraform(diagram: DiagramDTO): Promise<TerraformResponse> {

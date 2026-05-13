@@ -1,0 +1,308 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: AWS Builder - Full Stack Deployment (Nginx + Docker/Postgres + Gradle Spring Boot)
+
+Parameters:
+  Region:
+    Type: String
+    Default: ap-south-1
+
+  InstanceType:
+    Type: String
+    Default: t3.micro
+    Description: EC2 instance type - t3.micro is free tier eligible (750 hrs/month for first 12 months)
+
+  KeyPairName:
+    Type: AWS::EC2::KeyPair::KeyName
+    Description: Name of an existing EC2 KeyPair for SSH access
+
+  LatestAmiId:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64
+    Description: Latest Amazon Linux 2023 AMI from SSM Parameter Store
+
+Resources:
+  # ─── VPC ────────────────────────────────────────────────────────────────
+  vpc1:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.0.0.0/16
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: awsbuilder-vpc
+
+  # ─── Internet Gateway ──────────────────────────────────────────────────
+  igw1:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: awsbuilder-igw
+
+  igw1Attachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      InternetGatewayId: !Ref igw1
+      VpcId: !Ref vpc1
+
+  # ─── Route Table (public) ──────────────────────────────────────────────
+  publicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref vpc1
+      Tags:
+        - Key: Name
+          Value: awsbuilder-public-rt
+
+  publicRoute:
+    Type: AWS::EC2::Route
+    DependsOn: igw1Attachment
+    Properties:
+      RouteTableId: !Ref publicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref igw1
+
+  subnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      CidrBlock: 10.0.1.0/24
+      VpcId: !Ref vpc1
+      AvailabilityZone: !Select [0, !GetAZs '']
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: awsbuilder-public-subnet
+
+  subnet1RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref subnet1
+      RouteTableId: !Ref publicRouteTable
+
+  # ─── Security Group ────────────────────────────────────────────────────
+  ec2SecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow SSH, HTTP (nginx), and app server traffic
+      VpcId: !Ref vpc1
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0
+          Description: SSH access
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+          Description: HTTP (nginx)
+        - IpProtocol: tcp
+          FromPort: 8080
+          ToPort: 8080
+          CidrIp: 0.0.0.0/0
+          Description: Spring Boot app server (direct)
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+          Description: Allow all outbound
+      Tags:
+        - Key: Name
+          Value: awsbuilder-sg
+
+  # ─── EC2 Instance ──────────────────────────────────────────────────────
+  ec2Instance:
+    Type: AWS::EC2::Instance
+    DependsOn: igw1Attachment
+    CreationPolicy:
+      ResourceSignal:
+        Timeout: PT30M
+    Metadata:
+      AWS::CloudFormation::Init:
+        configSets:
+          full_install:
+            - install_packages
+            - setup_swap
+            - configure_nginx
+            - start_docker_postgres
+            - clone_and_run_app
+        install_packages:
+          commands:
+            01_update_system:
+              command: dnf update -y
+            02_install_nginx:
+              command: dnf install -y nginx
+            03_install_docker:
+              command: dnf install -y docker
+            04_install_git:
+              command: dnf install -y git
+            05_install_java:
+              command: dnf install -y java-17-amazon-corretto-devel
+            06_start_docker:
+              command: systemctl enable docker && systemctl start docker
+            07_start_nginx:
+              command: systemctl enable nginx
+
+        # ─── NEW: Swap setup to prevent OOM on t3.micro ───────────────
+        setup_swap:
+          commands:
+            01_create_swapfile:
+              command: dd if=/dev/zero of=/swapfile bs=128M count=16
+            02_chmod_swapfile:
+              command: chmod 600 /swapfile
+            03_mkswap:
+              command: mkswap /swapfile
+            04_swapon:
+              command: swapon /swapfile
+            05_persist_swap:
+              command: echo '/swapfile swap swap defaults 0 0' >> /etc/fstab
+
+        configure_nginx:
+          files:
+            /etc/nginx/conf.d/awsbuilder.conf:
+              content: |
+                server {
+                    listen 80;
+                    server_name _;
+
+                    location /api/ {
+                        proxy_pass http://127.0.0.1:8080;
+                        proxy_set_header Host $host;
+                        proxy_set_header X-Real-IP $remote_addr;
+                        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                        proxy_set_header X-Forwarded-Proto $scheme;
+                        proxy_read_timeout 90;
+                    }
+
+                    location / {
+                        proxy_pass http://127.0.0.1:8080;
+                        proxy_set_header Host $host;
+                        proxy_set_header X-Real-IP $remote_addr;
+                        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                        proxy_set_header X-Forwarded-Proto $scheme;
+                        proxy_read_timeout 90;
+                    }
+                }
+              mode: '000644'
+              owner: root
+              group: root
+          commands:
+            01_remove_default_conf:
+              command: rm -f /etc/nginx/conf.d/default.conf
+            02_start_nginx:
+              command: systemctl restart nginx
+
+        start_docker_postgres:
+          commands:
+            01_run_postgres:
+              command: |
+                docker run -d \
+                  --name terraform-builder-db \
+                  --restart always \
+                  -e POSTGRES_DB=terraform_builder \
+                  -e POSTGRES_USER=builder_user \
+                  -e POSTGRES_PASSWORD=builder_pass \
+                  -p 5432:5432 \
+                  postgres:15-alpine
+            02_wait_for_postgres:
+              command: |
+                echo "Waiting for PostgreSQL to be ready..."
+                for i in $(seq 1 30); do
+                  docker exec terraform-builder-db pg_isready -U builder_user -d terraform_builder && break
+                  echo "Attempt $i: Postgres not ready yet..."
+                  sleep 2
+                done
+
+        clone_and_run_app:
+          commands:
+            01_clone_repo:
+              command: |
+                cd /opt
+                git clone https://github.com/shreyas-3456/awsBuilder.git
+                chown -R ec2-user:ec2-user /opt/awsBuilder
+
+            02_write_gradle_properties:
+              command: |
+                mkdir -p /opt/awsBuilder/backend
+                cat > /opt/awsBuilder/backend/gradle.properties << 'EOF'
+                org.gradle.daemon=false
+                org.gradle.jvmargs=-Xmx400m -Xms256m -XX:MaxMetaspaceSize=128m
+                EOF
+
+            03_start_gradle_server:
+              command: |
+                cd /opt/awsBuilder/backend
+                chmod +x gradlew
+
+                # Limit JVM heap for the running Spring Boot app too
+                export JAVA_OPTS="-Xmx400m -Xms256m -XX:MaxMetaspaceSize=128m"
+
+                # NOTE: App uses p6spy SQL logging wrapper, so we must NOT override
+                # the driver-class-name. Use p6spy's URL format: jdbc:p6spy:postgresql://
+                # and pass only credentials — let the app's own driver config take over.
+                nohup ./gradlew bootRun \
+                  -Dspring.datasource.url=jdbc:p6spy:postgresql://localhost:5432/terraform_builder \
+                  -Dspring.datasource.username=builder_user \
+                  -Dspring.datasource.password=builder_pass \
+                  > /var/log/awsbuilder-app.log 2>&1 &
+
+                echo "Gradle server starting in background (PID: $!)"
+
+    Properties:
+      ImageId: !Ref LatestAmiId
+      InstanceType: !Ref InstanceType
+      KeyName: !Ref KeyPairName
+      SubnetId: !Ref subnet1
+      SecurityGroupIds:
+        - !Ref ec2SecurityGroup
+      Tags:
+        - Key: Name
+          Value: awsbuilder-ec2
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash -xe
+          exec > >(tee /var/log/user-data.log) 2>&1
+          echo "=== UserData script started at $(date) ==="
+
+          # Install cfn-bootstrap tools
+          dnf install -y aws-cfn-bootstrap
+
+          # Run cfn-init to execute all config sets
+          /opt/aws/bin/cfn-init -v \
+            --stack ${AWS::StackName} \
+            --resource ec2Instance \
+            --configsets full_install \
+            --region ${AWS::Region}
+
+          # Signal CloudFormation that the instance is ready
+          /opt/aws/bin/cfn-signal -e $? \
+            --stack ${AWS::StackName} \
+            --resource ec2Instance \
+            --region ${AWS::Region}
+
+          echo "=== UserData script completed at $(date) ==="
+
+Outputs:
+  VpcId:
+    Description: VPC ID
+    Value: !Ref vpc1
+
+  PublicSubnetId:
+    Description: Public Subnet ID
+    Value: !Ref subnet1
+
+  InstanceId:
+    Description: EC2 Instance ID
+    Value: !Ref ec2Instance
+
+  PublicIP:
+    Description: Public IP of the EC2 instance
+    Value: !GetAtt ec2Instance.PublicIp
+
+  ApplicationURL:
+    Description: Application URL (via nginx on port 80)
+    Value: !Sub http://${ec2Instance.PublicIp}
+
+  DirectAppURL:
+    Description: Direct Spring Boot URL (port 8080)
+    Value: !Sub http://${ec2Instance.PublicIp}:8080

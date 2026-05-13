@@ -2,6 +2,7 @@
  * Frontend service for AWS catalog API integration.
  * Provides TypeScript interfaces and API client methods for catalog endpoints.
  */
+import { API_BASE_URL } from './apiBaseUrl';
 
 // Catalog resource type definitions
 export interface Ec2Instance {
@@ -396,7 +397,7 @@ export interface IConfigService {
  * ConfigService implementation for fetching AWS catalog data from backend API.
  */
 class ConfigService implements IConfigService {
-  private baseUrl = '/api/config';
+  private baseUrl = `${API_BASE_URL}/config`;
 
   /**
    * Fetch EC2 instances with optional region and AMI ID filters.
