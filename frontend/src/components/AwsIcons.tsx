@@ -7,7 +7,7 @@ interface AwsIconProps {
 }
 
 export const VpcIcon: React.FC<AwsIconProps> = ({ className, alt = 'VPC' }) => <img src="/icons/aws/vpc.svg" className={className} alt={alt} />;
-export const SubnetIcon: React.FC<AwsIconProps> = ({ className, alt }) => <Network className={className} />;
+export const SubnetIcon: React.FC<AwsIconProps> = ({ className }) => <Network className={className} />;
 export const Ec2Icon: React.FC<AwsIconProps> = ({ className, alt = 'EC2' }) => <img src="/icons/aws/ec2.svg" className={className} alt={alt} />;
 export const S3Icon: React.FC<AwsIconProps> = ({ className, alt = 'S3' }) => <img src="/icons/aws/s3.svg" className={className} alt={alt} />;
 export const RdsIcon: React.FC<AwsIconProps> = ({ className, alt = 'RDS' }) => <img src="/icons/aws/rds.svg" className={className} alt={alt} />;

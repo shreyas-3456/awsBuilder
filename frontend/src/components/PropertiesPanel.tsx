@@ -192,6 +192,15 @@ const PROPERTY_FIELDS: Record<ResourceType, Array<{ name: string; label: string;
     { name: 'port', label: 'Port', type: 'text' },
     { name: 'tags', label: 'Tags (Key=Value,...)', type: 'text' },
     { name: 'region', label: 'Region', type: 'select', options: REGIONS.map(r => r.value) }
+  ],
+  EVENTBRIDGE: [
+    { name: 'rule_name', label: 'Rule Name', type: 'text', required: true },
+    { name: 'event_bus_name', label: 'Event Bus', type: 'text' },
+    { name: 'description', label: 'Description', type: 'text' },
+    { name: 'schedule_expression', label: 'Schedule', type: 'text' },
+    { name: 'state', label: 'State', type: 'select', options: ['ENABLED', 'DISABLED'] },
+    { name: 'tags', label: 'Tags (Key=Value,...)', type: 'text' },
+    { name: 'region', label: 'Region', type: 'select', options: REGIONS.map(r => r.value) }
   ]
 };
 
