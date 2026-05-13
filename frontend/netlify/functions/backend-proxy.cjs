@@ -6,13 +6,26 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS',
 };
 
-const hopByHopHeaders = new Set([
-  'connection',
-  'content-encoding',
-  'content-length',
-  'host',
-  'transfer-encoding',
+const requestHeadersToForward = new Set([
+  'accept',
+  'authorization',
+  'content-type',
 ]);
+
+const responseHeadersToForward = new Set([
+  'content-type',
+]);
+
+function buildTargetUrl(backendBaseUrl, proxiedPath, rawQuery) {
+  const baseUrl = new URL(backendBaseUrl);
+  const basePath = baseUrl.pathname.replace(/\/$/, '');
+  const requestPath = (proxiedPath || '/').replace(/^\//, '');
+
+  baseUrl.pathname = [basePath, requestPath].filter(Boolean).join('/');
+  baseUrl.search = rawQuery ? `?${rawQuery}` : '';
+
+  return baseUrl;
+}
 
 exports.handler = async (event) => {
   if (event.httpMethod === 'OPTIONS') {
@@ -41,13 +54,12 @@ exports.handler = async (event) => {
   const proxiedPath = event.path.startsWith(FUNCTION_PATH)
     ? event.path.slice(FUNCTION_PATH.length)
     : event.path;
-  const targetUrl = new URL(proxiedPath || '/', backendBaseUrl);
-  targetUrl.search = event.rawQuery ? `?${event.rawQuery}` : '';
+  const targetUrl = buildTargetUrl(backendBaseUrl, proxiedPath, event.rawQuery);
 
-  const requestHeaders = { ...event.headers };
-  for (const headerName of Object.keys(requestHeaders)) {
-    if (hopByHopHeaders.has(headerName.toLowerCase())) {
-      delete requestHeaders[headerName];
+  const requestHeaders = {};
+  for (const [headerName, headerValue] of Object.entries(event.headers || {})) {
+    if (requestHeadersToForward.has(headerName.toLowerCase())) {
+      requestHeaders[headerName] = headerValue;
     }
   }
 
@@ -62,7 +74,7 @@ exports.handler = async (event) => {
 
     const responseHeaders = {};
     response.headers.forEach((value, key) => {
-      if (!hopByHopHeaders.has(key.toLowerCase())) {
+      if (responseHeadersToForward.has(key.toLowerCase())) {
         responseHeaders[key] = value;
       }
     });
@@ -72,6 +84,7 @@ exports.handler = async (event) => {
       headers: {
         ...responseHeaders,
         ...corsHeaders,
+        'x-proxied-url': targetUrl.toString(),
       },
       body: await response.text(),
     };
